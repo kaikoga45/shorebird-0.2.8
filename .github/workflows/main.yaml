@@ -1,0 +1,185 @@
+name: ci
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  semantic_pull_request:
+    name: ✅ Semantic Pull Request
+    uses: VeryGoodOpenSource/very_good_workflows/.github/workflows/semantic_pull_request.yml@v1
+
+  changes:
+    runs-on: ubuntu-latest
+
+    outputs:
+      needs_dart_build: ${{ steps.needs_dart_build.outputs.changes }}
+      needs_redis_build: ${{ steps.needs_redis_build.outputs.changes }}
+      needs_verify: ${{ steps.needs_verify.outputs.changes }}
+
+    name: 👀 Detect Changes
+
+    steps:
+      - name: 📚 Git Checkout
+        uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        name: Build Detection
+        id: needs_dart_build
+        with:
+          filters: |
+            artifact_proxy:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/artifact_proxy/**
+            discord_gcp_alerts:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/discord_gcp_alerts/**
+            shorebird_cli:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/shorebird_cli/**
+              - packages/shorebird_code_push_client/**
+              - packages/shorebird_code_push_protocol/**
+            shorebird_code_push_client:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/shorebird_code_push_client/**
+              - packages/shorebird_code_push_protocol/**
+            shorebird_code_push_protocol:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/shorebird_code_push_protocol/**
+            jwt:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/jwt/**
+            scoped:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/scoped/**
+
+      - uses: dorny/paths-filter@v3
+        name: Redis Detection
+        id: needs_redis_build
+        with:
+          filters: |
+            redis_client:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/dart_package/action.yaml
+              - packages/redis_client/**
+
+      - uses: dorny/paths-filter@v3
+        name: Verify Detection
+        id: needs_verify
+        with:
+          filters: |
+            shorebird_cli:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/verify_version/action.yaml
+              - packages/shorebird_cli/**
+            shorebird_code_push_client:
+              - ./.github/codecov.yml
+              - ./.github/workflows/main.yaml
+              - ./.github/actions/verify_version/action.yaml
+              - packages/shorebird_code_push_client/**
+
+  build_dart_packages:
+    needs: changes
+    if: ${{ needs.changes.outputs.needs_dart_build != '[]' }}
+
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.needs_dart_build) }}
+
+    runs-on: ubuntu-latest
+
+    name: 🎯 Build ${{ matrix.package }}
+
+    steps:
+      - name: 📚 Git Checkout
+        uses: actions/checkout@v4
+
+      - name: 🎯 Build ${{ matrix.package }}
+        uses: ./.github/actions/dart_package
+        with:
+          codecov_token: ${{ secrets.CODECOV_TOKEN }}
+          working_directory: packages/${{ matrix.package }}
+
+  build_redis:
+    needs: changes
+    if: ${{ needs.changes.outputs.needs_redis_build != '[]' }}
+
+    permissions: write-all
+
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.needs_redis_build) }}
+
+    runs-on: ubuntu-latest
+
+    name: 🎯 Build ${{ matrix.package }}
+
+    steps:
+      - name: 📚 Git Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐳 Run Redis
+        run: |
+          docker pull redis/redis-stack-server:latest
+          docker run --name test_redis -d -p 6379:6379 --rm -e REDIS_ARGS="--requirepass password" redis/redis-stack-server:latest
+
+      - name: 🎯 Build ${{ matrix.package }}
+        uses: ./.github/actions/dart_package
+        with:
+          codecov_token: ${{ secrets.CODECOV_TOKEN }}
+          working_directory: packages/${{ matrix.package }}
+
+  verify_packages:
+    needs: changes
+    if: ${{ needs.changes.outputs.needs_verify != '[]' }}
+
+    strategy:
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.needs_verify) }}
+
+    runs-on: ubuntu-latest
+
+    name: 🔎 Verify ${{ matrix.package }}
+
+    steps:
+      - name: 📚 Git Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔎 Verify ${{ matrix.package }}
+        uses: ./.github/actions/verify_version
+        with:
+          working_directory: packages/${{ matrix.package }}
+
+  ci:
+    needs:
+      [semantic_pull_request, build_dart_packages, build_redis, verify_packages]
+    if: ${{ always() }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⛔️ exit(1) on failure
+        if: ${{ contains(join(needs.*.result, ','), 'failure') }}
+        run: exit 1

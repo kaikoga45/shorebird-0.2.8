@@ -1,0 +1,64 @@
+name: Deploy Artifact Proxy Dev
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy_artifact_proxy.yaml
+      - "packages/artifact_proxy/**"
+
+env:
+  PROJECT_ID: code-push-dev
+  SERVICE: artifact-proxy
+  REGION: us-central1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: packages/artifact_proxy
+
+    name: ☁️ Artifact Proxy
+
+    steps:
+      - name: 📚 Git Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dart-lang/setup-dart@v1
+
+      - name: GCloud Auth
+        uses: "google-github-actions/auth@v2"
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          credentials_json: ${{ secrets.CLOUD_RUN_SA_DEV  }}
+          export_environment_variables: true
+
+      - name: Setup Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2.1.0
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Authorize Docker Push
+        run: gcloud auth configure-docker
+
+      - name: Build and Push Container
+        run: |-
+          docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }} .
+          docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2.2.0
+        with:
+          service: ${{ env.SERVICE }}
+          image: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }}:${{ github.sha }}
+          region: ${{ env.REGION }}
+
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}

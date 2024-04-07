@@ -1,0 +1,28 @@
+name: Verify Version Workflow
+description: Verify the version of the package is correct
+
+inputs:
+  working_directory:
+    required: false
+    description: "The working directory to run the command in"
+    default: "."
+
+runs:
+  using: "composite"
+
+  steps:
+    - name: 📚 Git Checkout
+      uses: actions/checkout@v3
+
+    - name: 🎯 Setup Dart
+      uses: dart-lang/setup-dart@v1
+
+    - name: 📦 Install Dependencies
+      shell: ${{ inputs.shell }}
+      run: dart pub get
+      working-directory: ${{ inputs.working_directory }}
+
+    - name: 🔎 Verify version
+      shell: ${{ inputs.shell }}
+      run: dart run test --run-skipped -t version-verify
+      working-directory: ${{ inputs.working_directory }}
