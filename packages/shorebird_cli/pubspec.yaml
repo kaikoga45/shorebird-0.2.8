@@ -30,7 +30,7 @@ dependencies:
   jwt:
     path: ../jwt
   mason_logger: ^0.2.12
-  meta: ^1.9.0
+  meta: ^1.14.0
   path: ^1.8.3
   platform: ^3.1.0
   propertylistserialization: ^1.3.0
